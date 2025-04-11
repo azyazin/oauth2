@@ -7,6 +7,7 @@ import jwt
 from jwt import PyJWTError
 import secrets
 import base64
+import os
 
 
 # Функция для генерации случайного ключа
@@ -31,7 +32,24 @@ class OAuth2Config:
 # Генерируем начальный SECRET_KEY
 SECRET_KEY = generate_secret_key()
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
+try:
+    # Пытаемся прочитать переменную окружения и преобразовать в целое число
+    ACCESS_TOKEN_EXPIRE_MINUTES_STR = os.environ.get(
+        "ACCESS_TOKEN_EXPIRE_MINUTES", # Имя переменной окружения
+        str(DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES) # Значение по умолчанию (строкой)
+    )
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(ACCESS_TOKEN_EXPIRE_MINUTES_STR)
+    # Простая проверка корректности значения
+    if ACCESS_TOKEN_EXPIRE_MINUTES <= 0:
+        print(f"Warning: Invalid ACCESS_TOKEN_EXPIRE_MINUTES value ({ACCESS_TOKEN_EXPIRE_MINUTES}). Using default: {DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES}")
+        ACCESS_TOKEN_EXPIRE_MINUTES = DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES
+except ValueError:
+    # Если не удалось преобразовать в число, используем значение по умолчанию
+    print(f"Warning: Could not parse ACCESS_TOKEN_EXPIRE_MINUTES environment variable ('{ACCESS_TOKEN_EXPIRE_MINUTES_STR}'). Using default: {DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES}")
+    ACCESS_TOKEN_EXPIRE_MINUTES = DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES
+
+print(f"INFO: Using access token lifetime: {ACCESS_TOKEN_EXPIRE_MINUTES} minutes")
 
 # Хранилище для активных refresh tokens
 # В продакшене следует использовать базу данных
@@ -300,6 +318,6 @@ async def webhook(data: WebhookDataFlexible, token_data: dict = Depends(validate
 
 if __name__ == "__main__":
     import uvicorn
-    import os
+
     port = int(os.environ.get("PORT", 8000)) # PaaS обычно задает порт через env var PORT
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False) # reload=False для продакшена
