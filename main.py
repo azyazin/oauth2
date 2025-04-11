@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status,  Form
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from datetime import datetime, timedelta
@@ -139,76 +139,36 @@ async def get_oauth2_config():
 
 
 @app.post(OAuth2Config.TOKEN_URL, response_model=Token)
-async def create_token(request: TokenRequest):
-    if request.grant_type not in ["client_credentials", "refresh_token"]:
+async def create_token(
+    # --- ИЗМЕНЕНО: Принимаем параметры формы вместо JSON ---
+    grant_type: str = Form(...),
+    client_id: str = Form(...),
+    client_secret: str = Form(...),
+    scope: Optional[str] = Form(None) # scope опционален
+    # refresh_token не нужен для client_credentials
+    # ----------------------------------------------------
+):
+    # Теперь обращаемся к параметрам напрямую по имени
+    if grant_type not in ["client_credentials"]: # Эта точка входа только для client_credentials
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported grant type"
+            detail=f"Unsupported grant type for this endpoint: {grant_type}"
         )
 
-    if request.client_id != OAuth2Config.CLIENT_ID or request.client_secret != OAuth2Config.CLIENT_SECRET:
+    # Используем client_id, client_secret напрямую
+    if client_id != OAuth2Config.CLIENT_ID or client_secret != OAuth2Config.CLIENT_SECRET:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid client credentials"
         )
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # Используем scope напрямую, ставим дефолтный если не пришел
+    effective_scope = scope or "webhook.read"
     access_token = create_access_token(
         data={
-            "sub": request.client_id,
-            "scope": request.scope or "webhook.read"
-        },
-        expires_delta=access_token_expires
-    )
-
-    # Генерируем новый refresh token
-    refresh_token = generate_refresh_token()
-    active_refresh_tokens.add(refresh_token)
-
-    return Token(
-        access_token=access_token,
-        token_type="bearer",
-        refresh_token=refresh_token,
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        scope=request.scope or "webhook.read"
-    )
-
-
-@app.post(OAuth2Config.REFRESH_TOKEN_URL, response_model=Token)
-async def refresh_token(request: TokenRequest):
-    if request.grant_type != "refresh_token":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid grant type"
-        )
-
-    if not request.refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Refresh token is required"
-        )
-
-    if request.client_id != OAuth2Config.CLIENT_ID or request.client_secret != OAuth2Config.CLIENT_SECRET:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid client credentials"
-        )
-
-    # Проверяем, что refresh token активен
-    if request.refresh_token not in active_refresh_tokens:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token"
-        )
-
-    # Удаляем старый refresh token
-    active_refresh_tokens.remove(request.refresh_token)
-
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={
-            "sub": request.client_id,
-            "scope": request.scope or "webhook.read"
+            "sub": client_id, # Используем client_id напрямую
+            "scope": effective_scope
         },
         expires_delta=access_token_expires
     )
@@ -222,7 +182,67 @@ async def refresh_token(request: TokenRequest):
         token_type="bearer",
         refresh_token=new_refresh_token,
         expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        scope=request.scope or "webhook.read"
+        scope=effective_scope # Возвращаем фактически установленный scope
+    )
+
+
+@app.post(OAuth2Config.REFRESH_TOKEN_URL, response_model=Token)
+async def refresh_token(
+    # --- ИЗМЕНЕНО: Принимаем параметры формы вместо JSON ---
+    grant_type: str = Form(...),
+    refresh_token: str = Form(...), # refresh_token здесь обязателен
+    client_id: str = Form(...),     # client_id/secret часто требуются и при refresh
+    client_secret: str = Form(...),
+    scope: Optional[str] = Form(None) # Опционально для запроса нового scope
+    # ----------------------------------------------------
+):
+    if grant_type != "refresh_token":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid grant type"
+        )
+
+    # FastAPI уже проверит наличие refresh_token, т.к. он не Optional
+    # if not refresh_token: ... (проверка не нужна)
+
+    # Проверяем client credentials (стандартная практика для refresh token)
+    if client_id != OAuth2Config.CLIENT_ID or client_secret != OAuth2Config.CLIENT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid client credentials"
+        )
+
+    # Проверяем, что refresh token активен (используем refresh_token напрямую)
+    if refresh_token not in active_refresh_tokens:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token"
+        )
+
+    # Удаляем старый refresh token (используем refresh_token напрямую)
+    active_refresh_tokens.remove(refresh_token)
+
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # Используем scope напрямую, ставим дефолтный если не пришел
+    effective_scope = scope or "webhook.read"
+    access_token = create_access_token(
+        data={
+            "sub": client_id, # Используем client_id напрямую
+            "scope": effective_scope
+        },
+        expires_delta=access_token_expires
+    )
+
+    # Генерируем НОВЫЙ refresh token (rotation)
+    new_refresh_token = generate_refresh_token()
+    active_refresh_tokens.add(new_refresh_token)
+
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        refresh_token=new_refresh_token,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        scope=effective_scope # Возвращаем фактически установленный scope
     )
 
 
