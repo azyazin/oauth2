@@ -15,3 +15,4 @@ PyJWT~=2.10.1
 fastapi~=0.115.6
 pydantic~=2.10.4
 uvicorn~=0.34.0
+python-multipart==0.0.9
