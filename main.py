@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Depends, HTTPException, status,  Form
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 import jwt
 from jwt import PyJWTError
 import secrets
@@ -41,9 +41,12 @@ active_refresh_tokens = set()
 app = FastAPI()
 
 
-class WebhookData(BaseModel):
-    event: str
-    data: Dict
+class WebhookDataFlexible(BaseModel):
+    event_name: str
+    eventData: Dict[str, Any]
+    model_config = {
+        "extra": "allow"
+    }
 
 
 class Token(BaseModel):
@@ -285,10 +288,11 @@ async def refresh_token(
 
 
 @app.post("/webhook")
-async def webhook(data: WebhookData, token_data: dict = Depends(validate_token)):
+async def webhook(data: WebhookDataFlexible, token_data: dict = Depends(validate_token)):
     print(f"Received webhook from client {token_data['sub']}")
-    print(f"Event: {data.event}")
-    print(f"Data: {data.data}")
+    print(f"Event: {data.event_name}")
+    print(f"Event: {data.eventData}")
+
     return {"status": "success", "message": "Webhook received"}
 
 
