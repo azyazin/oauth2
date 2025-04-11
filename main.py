@@ -111,15 +111,53 @@ async def validate_token(token: str = Depends(oauth2_scheme)):
                 detail="Token not found or expired",
             )
 
+        # secret = active_tokens[token]
+        # payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
+        #
+        # if payload.get("scope") not in OAuth2Config.SCOPES:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_401_UNAUTHORIZED,
+        #         detail="Invalid scope",
+        #     )
+        # return payload
         secret = active_tokens[token]
         payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
 
-        if payload.get("scope") not in OAuth2Config.SCOPES:
+        token_scope_str = payload.get("scope")  # Получаем строку скоупов из токена
+
+        if not token_scope_str:  # Если скоупа нет вообще
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid scope",
+                detail="Missing scope in token",
             )
-        return payload
+
+        # Разделяем строку скоупов по пробелам и убираем пустые элементы
+        token_scopes = set(token_scope_str.split())
+
+        # Проверяем, есть ли *хотя бы одно* пересечение между скоупами токена
+        # и разрешенными скоупами сервера.
+        # Или, если нужно чтобы все скоупы токена были разрешены:
+        # if not token_scopes.issubset(set(OAuth2Config.SCOPES)):
+
+        # Чаще достаточно проверить, что есть *хотя бы один* нужный скоуп.
+        # Например, если эндпоинту нужен 'webhook.read':
+        required_scope_for_endpoint = "webhook.write"  # Или "webhook.write" смотря что нужно
+        if required_scope_for_endpoint not in token_scopes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                # 403 Forbidden более корректен, если скоуп валидный, но недостаточный
+                detail=f"Token does not have the required scope: {required_scope_for_endpoint}",
+            )
+
+        # --- Старая проверка (менее гибкая) ---
+        # if token_scope_str not in OAuth2Config.SCOPES:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_401_UNAUTHORIZED,
+        #         detail="Invalid scope",
+        #     )
+        # ------------------------------------
+
+        return payload  # Возвращаем весь payload, если проверка пройдена
     except PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
