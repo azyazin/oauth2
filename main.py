@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status,  Form
+from fastapi import FastAPI, Depends, HTTPException, status,  Form, Request
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
@@ -58,7 +58,7 @@ active_refresh_tokens = set()
 
 app = FastAPI()
 
-
+app.state.latest_webhook_payload = None
 class WebhookDataFlexible(BaseModel):
     event_name: str
     eventData: Dict[str, Any]
@@ -306,13 +306,31 @@ async def refresh_token(
 
 
 @app.post("/webhook")
-async def webhook(data: WebhookDataFlexible, token_data: dict = Depends(validate_token)):
+async def webhook(request: Request,data: WebhookDataFlexible, token_data: dict = Depends(validate_token)):
     print(f"Received webhook from client {token_data['sub']}")
     print(f"Event: {data.event_name}")
     print(f"Event: {data.eventData}")
-
+    request.app.state.latest_webhook_payload = data.model_dump(mode='json')  # mode='json' для лучшей сериализации
+    print(f"Stored latest webhook payload for event: {data.event_name}")
     return {"status": "success", "message": "Webhook received"}
 
+@app.get("/latest-webhook")
+async def get_latest_webhook(request: Request): # <--- Добавлен параметр request
+    """
+    Возвращает полезную нагрузку самого последнего вебхука,
+    полученного сервером с момента его запуска.
+    """
+    latest_payload = request.app.state.latest_webhook_payload
+
+    if latest_payload is not None:
+        # FastAPI автоматически преобразует словарь в JSON ответ
+        return latest_payload
+    else:
+        # Если еще ни одного вебхука не было получено
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No webhook has been received yet since the server started."
+        )
 
 
 
